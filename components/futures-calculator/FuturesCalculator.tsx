@@ -20,11 +20,13 @@ import {
   FUTURES_CONTRACTS,
   RISK_PERCENTAGES,
   getContractBySymbol,
+  getMicroAlternative,
   type FuturesContract,
 } from '@/lib/utils/futures/contracts'
 import {
   calculatePosition,
   getContractMatrix,
+  getRiskPerContract,
   type Direction,
 } from '@/lib/utils/futures/calculations'
 
@@ -112,9 +114,12 @@ export default function FuturesCalculator() {
   // Calculation Results State
   // ============================================================================
   const [tradingContracts, setTradingContracts] = useState(1)
+  const [tradingContractsInput, setTradingContractsInput] = useState('1')
 
   const selectedContract: FuturesContract =
     getContractBySymbol(selectedSymbol) ?? FUTURES_CONTRACTS[0]
+
+  const microAlternative = getMicroAlternative(selectedSymbol)
 
   const microContracts = FUTURES_CONTRACTS.filter((contract) => contract.isMicro)
   const standardContracts = FUTURES_CONTRACTS.filter((contract) => !contract.isMicro)
@@ -151,6 +156,7 @@ export default function FuturesCalculator() {
     fetchLivePrice(selectedSymbol)
     setStopLossPrice('')
     setTakeProfitPrice('')
+    setTradingContractCount(1)
   }, [selectedSymbol, fetchLivePrice])
 
   const computedResults = useMemo(() => {
@@ -165,7 +171,6 @@ export default function FuturesCalculator() {
       return {
         results: null,
         contractMatrix: getContractMatrix(accountSize, slPoints, selectedContract),
-        tradingContracts: 1,
       }
     }
 
@@ -197,18 +202,19 @@ export default function FuturesCalculator() {
     return {
       results: position,
       contractMatrix: getContractMatrix(accountSize, position.slPoints, selectedContract),
-      tradingContracts: Math.max(1, Math.floor(position.contracts)),
     }
   }, [accountSize, riskPercent, entryPrice, stopLossPrice, takeProfitPrice, direction, selectedContract, inputMode])
 
-  // Sync computed trading contracts to state (user can still override manually)
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setTradingContracts(computedResults.tradingContracts)
-  }, [computedResults.tradingContracts])
-
   const displayResults = computedResults.results
   const displayContractMatrix = computedResults.contractMatrix
+
+  const slTicksInput = parseFloat(stopLossPrice) || 0
+  const perContractRisk = inputMode === 'ticks' && slTicksInput > 0
+    ? getRiskPerContract(slTicksInput, selectedContract)
+    : displayResults
+      ? displayResults.slPoints * selectedContract.pointValue
+      : 0
+  const tickValue = selectedContract.pointValue / selectedContract.ticksPerPoint
 
   // ============================================================================
   // Input Mode Toggle Handler
@@ -224,13 +230,28 @@ export default function FuturesCalculator() {
   // Trading Contracts Handlers
   // ============================================================================
 
-  const handleStepTradingContracts = (delta: number) => {
-    setTradingContracts((previous) => Math.max(1, previous + delta))
+  const setTradingContractCount = (count: number) => {
+    setTradingContracts(count)
+    setTradingContractsInput(String(count))
   }
 
   const handleTradingContractsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const parsed = parseInt(event.target.value)
-    setTradingContracts(Math.max(1, isNaN(parsed) ? 1 : parsed))
+    const raw = event.target.value
+    if (raw === '') {
+      setTradingContractsInput('')
+      return
+    }
+    if (!/^\d+$/.test(raw)) return
+    setTradingContractsInput(raw)
+    setTradingContracts(parseInt(raw, 10))
+  }
+
+  const handleTradingContractsBlur = () => {
+    const parsed = parseInt(tradingContractsInput, 10)
+    if (!tradingContractsInput || isNaN(parsed) || parsed < 1) {
+      setTradingContractsInput('1')
+      setTradingContracts(1)
+    }
   }
 
   // ============================================================================
@@ -393,6 +414,15 @@ export default function FuturesCalculator() {
                     placeholder={inputMode === 'ticks' ? 'e.g. 80' : '0.00'}
                   />
                 </div>
+                {inputMode === 'ticks' && stopLossPrice && slTicksInput > 0 && (
+                  <p className="text-xs text-gray-500">
+                    {slTicksInput} ticks = {(slTicksInput / selectedContract.ticksPerPoint).toFixed(2)} pts ={' '}
+                    <span className="text-red-400 font-medium tabular-nums">
+                      ${perContractRisk.toFixed(2)} per contract
+                    </span>
+                    <span className="text-gray-600"> (${tickValue.toFixed(2)}/tick)</span>
+                  </p>
+                )}
                 {inputMode === 'ticks' && entryPrice && stopLossPrice && (
                   <p className="text-xs text-gray-500">
                     SL price:{' '}
@@ -475,7 +505,7 @@ export default function FuturesCalculator() {
                       {displayContractMatrix.map((row) => (
                         <th
                           key={row.contracts}
-                          onClick={() => setTradingContracts(row.contracts)}
+                          onClick={() => setTradingContractCount(row.contracts)}
                           className={`px-3 py-2 text-center font-semibold cursor-pointer transition-colors ${
                             tradingContracts === row.contracts
                               ? 'bg-emerald-600 text-white'
@@ -493,7 +523,7 @@ export default function FuturesCalculator() {
                       {displayContractMatrix.map((row) => (
                         <td
                           key={row.contracts}
-                          onClick={() => setTradingContracts(row.contracts)}
+                          onClick={() => setTradingContractCount(row.contracts)}
                           className={`px-3 py-2 text-center cursor-pointer transition-colors ${
                             tradingContracts === row.contracts
                               ? 'bg-emerald-600/20 text-red-400 font-semibold'
@@ -509,7 +539,7 @@ export default function FuturesCalculator() {
                       {displayContractMatrix.map((row) => (
                         <td
                           key={row.contracts}
-                          onClick={() => setTradingContracts(row.contracts)}
+                          onClick={() => setTradingContractCount(row.contracts)}
                           className={`px-3 py-2 text-center cursor-pointer transition-colors ${
                             tradingContracts === row.contracts
                               ? 'bg-emerald-600/20 text-amber-400 font-semibold'
@@ -536,7 +566,7 @@ export default function FuturesCalculator() {
               <h2 className="text-base font-semibold text-gray-300 mb-3">Results</h2>
 
               {displayResults ? (() => {
-                const actualMaxLoss = tradingContracts * displayResults.slPoints * selectedContract.pointValue
+                const actualMaxLoss = tradingContracts * perContractRisk
                 const actualMaxProfit = tradingContracts * displayResults.tpPoints * selectedContract.pointValue
                 const actualRiskPercent = (actualMaxLoss / accountSize) * 100
 
@@ -551,7 +581,16 @@ export default function FuturesCalculator() {
                       </p>
                       <p className="text-xs text-gray-600 mt-1">
                         based on {riskPercent}% risk · ${displayResults.riskDollars.toLocaleString()}
+                        {perContractRisk > 0 && (
+                          <> · ${perContractRisk.toFixed(2)}/contract at this SL</>
+                        )}
                       </p>
+                      {displayResults.contracts < 1 && microAlternative && (
+                        <p className="text-xs text-amber-400 mt-2 bg-amber-950/40 border border-amber-800/40 px-3 py-2 rounded">
+                          Less than 1 contract — you can&apos;t trade a fractional contract.
+                          Consider switching to {microAlternative.symbol} (micro) instead.
+                        </p>
+                      )}
                     </div>
 
                     <div className="border-t border-gray-800" />
@@ -559,33 +598,25 @@ export default function FuturesCalculator() {
                     {/* Trading contracts override */}
                     <div>
                       <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">You Will Trade</p>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleStepTradingContracts(-1)}
-                          className="w-10 h-10 bg-gray-800 hover:bg-gray-700 rounded font-bold text-gray-300 transition-colors flex items-center justify-center text-lg"
-                        >
-                          −
-                        </button>
-                        <input
-                          type="number"
-                          min={1}
-                          step={1}
-                          value={tradingContracts}
-                          onChange={handleTradingContractsChange}
-                          className="flex-1 bg-gray-800 border border-emerald-700 rounded px-3 py-2 text-white text-2xl font-bold tabular-nums text-center focus:outline-none focus:border-emerald-500"
-                        />
-                        <button
-                          onClick={() => handleStepTradingContracts(1)}
-                          className="w-10 h-10 bg-gray-800 hover:bg-gray-700 rounded font-bold text-gray-300 transition-colors flex items-center justify-center text-lg"
-                        >
-                          +
-                        </button>
-                      </div>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={tradingContractsInput}
+                        onChange={handleTradingContractsChange}
+                        onBlur={handleTradingContractsBlur}
+                        placeholder="1"
+                        className="w-full bg-gray-800 border border-emerald-700 rounded px-3 py-2 text-white text-2xl font-bold tabular-nums text-center focus:outline-none focus:border-emerald-500"
+                      />
                       <p className="text-xs text-gray-500 mt-2 text-center">
                         Actual risk:{' '}
                         <span className="text-red-400 font-medium">
-                          ${actualMaxLoss.toFixed(2)}
+                          ${actualMaxLoss.toFixed(2)} total
                         </span>
+                        {tradingContracts > 1 && (
+                          <>
+                            {' '}({tradingContracts} × ${perContractRisk.toFixed(2)})
+                          </>
+                        )}
                         {' '}·{' '}
                         <span className={`font-medium ${actualRiskPercent > 5 ? 'text-red-400' : actualRiskPercent > 2 ? 'text-amber-400' : 'text-emerald-400'}`}>
                           {actualRiskPercent.toFixed(2)}% of account
@@ -646,12 +677,12 @@ export default function FuturesCalculator() {
                 </div>
                 <div className="divide-y divide-gray-800">
                   {([
-                    ['Point Value', `$${selectedContract.pointValue.toFixed(2)}`],
+                    ['Tick Value per Point', `$${selectedContract.pointValue.toFixed(2)}`],
                     ['Tick Size', selectedContract.tickSize.toString()],
                     ['Ticks per Point', selectedContract.ticksPerPoint.toString()],
-                    ['Tick Value', `$${(selectedContract.pointValue / selectedContract.ticksPerPoint).toFixed(2)}`],
+                    ['$ per Tick', `$${(selectedContract.pointValue / selectedContract.ticksPerPoint).toFixed(2)}`],
                     ['Exchange', selectedContract.exchange],
-                    ['Formula', `Contracts = Risk ÷ (SL pts × $${selectedContract.pointValue})`],
+                    ['Formula', `Risk $ ÷ (SL pts × $${selectedContract.pointValue})`],
                   ] as [string, string][]).map(([label, value]) => (
                     <div key={label} className="flex items-center justify-between px-4 py-2.5">
                       <span className="text-sm text-gray-400">{label}</span>

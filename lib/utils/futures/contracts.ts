@@ -114,6 +114,19 @@ export const FUTURES_CONTRACTS: FuturesContract[] = [
 
 export const RISK_PERCENTAGES = [0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 7]
 
+/** Standard contract → micro equivalent (per position-sizing guide). */
+const MICRO_ALTERNATIVES: Record<string, string> = {
+  NQ: 'MNQ',
+  ES: 'MES',
+  YM: 'MYM',
+  GC: 'MGC',
+}
+
 export function getContractBySymbol(symbol: string): FuturesContract | undefined {
   return FUTURES_CONTRACTS.find((contract) => contract.symbol === symbol)
+}
+
+export function getMicroAlternative(symbol: string): FuturesContract | undefined {
+  const microSymbol = MICRO_ALTERNATIVES[symbol]
+  return microSymbol ? getContractBySymbol(microSymbol) : undefined
 }

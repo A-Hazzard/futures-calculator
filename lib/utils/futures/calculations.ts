@@ -38,6 +38,12 @@ type CalculatePositionParams = {
   contract: FuturesContract
 }
 
+/**
+ * Position sizing per contract guide:
+ *   Contracts = Risk $ ÷ (Stop Loss Points × Tick Value per Point)
+ *
+ * `pointValue` is the dollar value per index point (PDF: "Tick Value per Point").
+ */
 export function calculatePosition(params: CalculatePositionParams): PositionResult {
   const { accountSize, riskPercent, entryPrice, stopLossPrice, takeProfitPrice, direction, contract } = params
 
@@ -113,6 +119,14 @@ function getDirectionWarning(
     if (takeProfit >= entry) return 'Short take profit must be below entry price'
   }
   return null
+}
+
+/**
+ * Dollar risk for one contract given a stop-loss distance in ticks.
+ */
+export function getRiskPerContract(slTicks: number, contract: FuturesContract): number {
+  const slPoints = slTicks * contract.tickSize
+  return round(slPoints * contract.pointValue, 2)
 }
 
 function round(value: number, decimals: number): number {
